@@ -1,0 +1,86 @@
+#####################################################################################
+# The following R script demonstrates the code used to calculate 
+# a suite of stream temeprature metrics based on data collected using
+# HOBOWARE data loggers
+#
+# Author: Mischa Turschwell
+# e. mischa.turschwell@griffithuni.edu.au
+#####################################################################################
+
+# Set working directory
+setwd("C:/Mischa/HOBOware/CSV_data_files")
+
+# Install and load required libraries
+library(ggplot2)
+library(lubridate) 
+library(dplyr)
+
+# Get the HOBO.csv file
+# Data <- read.csv("/path_to_logger_file/logger_1_no_header.csv", skip=1)
+
+# Example to read a logger####
+data <- read.csv("10422952.csv", skip=1, header =TRUE)
+
+# Select columns of interest - observation number, time, temperature
+data <- data[,c(1:3)]
+
+# Change column names to something sensible
+colnames(data) <- c("obs", "time", "temp")
+
+
+# Make ggplot object and view temperature trace to check for inconsistencies in data
+# data checking as per: "Dunham et al. (2005). Measuring stream temperature with digital data loggers: a user's guide"
+# is highly recommended 
+p <- ggplot(data, aes(obs, temp))
+p + geom_line()
+
+# IF REQUIRED: edit data to remove inconsistencies for dewatering events etc
+# Slice rows and rename columns to get a desired range like this:
+data <- data[c(200:2000),c("obs", "time", "temp")]
+
+# Convert date and times to usable format 
+data$date <- as.POSIXct(strptime(data$time, format = "%m/%d/%Y %H:%M:%S %p"))
+
+
+# Transform date to julian days and calculate maximum daily temperatures 
+data <- transform(data, jday = yday(date))
+daymax <- aggregate(data[, "temp"], list(data$jday), max) 
+colnames(daymax) <- c("julian_day","max_temp")
+daymax <-na.exclude(daymax)  
+
+# Calculate the hottest day and store as df
+hottest_day <- max(daymax[,2])
+hottest_day <- data.frame(hottest_day)
+
+# Indicator to show whether the temperature was over a desired threshold of your choosing (i.e. 22)
+event_days <- daymax["max_temp"] >22
+
+# Change logical matrix (TRUE, FALSE) to numerical matrix (0,1) and then vector.
+event_days <- (event_days*1)
+event_days <- as.vector(as.matrix(event_days))
+
+# Calculates the total number of days daily max temp exceeded threshold (frequency days)
+frequency_days <- sum(event_days)
+frequency_days <- as.data.frame(frequency_days)
+
+# Computes the lengths and values of runs of equal values in vector created in line 60
+event_days <-rle(event_days)
+
+# Finds and stores lengths of consecutive sequences where indicator value = 1
+values <- event_days$length[event_days$values == 1]
+
+# Store maximum length of consecutive days over threshold as df
+event_days <- max(values)
+event_days <- as.data.frame(event_days)
+
+# Combine metrics into a single file 
+metrics <- cbind(hottest_day, event_days, frequency_days)
+
+# Write out your file with associated loggerID to store 
+write.csv(metrics,"loggerID_metrics.csv", row.names=TRUE)
+
+##############################################################
+#  Note that the event and frequency day metrics can be applied
+#  at whatever resolution the recorded data is
+#  i.e. mins, hours, days, weeks etc
+###############################################################
